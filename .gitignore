@@ -1,0 +1,22 @@
+# --- Terraform ---
+# El state contiene valores sensibles (la contraseña de RDS, por ejemplo).
+# Nunca lo subas al repo.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+# Tus valores locales (ID de cuenta, tu IP). No van al repo.
+*.tfvars
+!terraform.tfvars.example
+
+# --- Evidencia forense ---
+# La evidencia NUNCA va en git: puede contener secretos y pesa mucho.
+evidencia/
+*.zip
+*.lime
+*.raw
+bitacora-*.md
+
+# --- Varios ---
+.DS_Store
+*.bak
