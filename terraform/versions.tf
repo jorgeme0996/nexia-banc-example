@@ -5,7 +5,7 @@
 # Fijar versiones hace que el laboratorio se comporte igual hoy y en 6 meses.
 
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.10" # 1.10+ por el lock nativo en S3 (backend.tf)
 
   required_providers {
     aws = {

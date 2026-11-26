@@ -59,6 +59,10 @@ cd terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
+> Este `terraform.tfvars` es **solo para tus pruebas locales** (`plan`,
+> `output`). En GitHub Actions los mismos valores salen de las Variables del
+> repo (`TF_LAB_ACCOUNT_ID`, `TF_ADMIN_CIDR`, `AWS_REGION`), ver paso 0.
+
 Edita `terraform.tfvars`:
 
 | Variable | De dónde sale | Para qué |
@@ -97,8 +101,15 @@ diría eso?
 
 ## 1.4 · Desplegar
 
+El despliegue lo hace **GitHub Actions** (paso 0.6: Run workflow → apply →
+aprobar). Pero antes conviene que corras el plan en tu Mac para aprender a
+leerlo sin prisa. El `init` apunta al **mismo state en S3** que usa GitHub:
+
 ```bash
-terraform init        # baja los providers (aws, random, tls)
+cd terraform
+BUCKET=$(cd ../bootstrap && terraform output -json github_variables | python3 -c 'import sys,json;print(json.load(sys.stdin)["TF_STATE_BUCKET"])')
+
+terraform init -backend-config="bucket=$BUCKET" -backend-config="region=us-east-1"
 terraform fmt -check  # revisa el formato (no cambia nada)
 terraform validate    # revisa la sintaxis
 terraform plan        # te muestra QUÉ va a crear, sin crear nada
@@ -118,11 +129,19 @@ destroy`**:
 Busca cada uno en la salida del plan: leer planes es una habilidad que vas a
 usar mucho. **Si ves cualquier `destroy`, detente y revisa.**
 
-Cuando estés conforme:
+Cuando estés conforme, despliega **desde GitHub**: Actions → terraform → Run
+workflow → `apply` → aprueba en el environment `lab`. Compara el log del job
+con el plan que viste en tu Mac: deben coincidir.
+
+> No hagas `terraform apply` desde tu Mac: la idea es que todo cambio quede
+> registrado en GitHub (quién, cuándo, qué commit) y en CloudTrail con el rol
+> `forensics-lab-gha-apply`. Si aplicas a mano, ese rastro se mezcla con tu
+> usuario, y en el forense te va a costar separar qué cambio fue legítimo.
+
+Cuando el job termine, en tu Mac:
 
 ```bash
-terraform apply       # escribe "yes"
-terraform output
+terraform output      # lee el state de S3 que acaba de escribir GitHub
 ```
 
 ---
@@ -153,7 +172,7 @@ Prueba también la guarda: pon temporalmente un `lab_account_id` falso en
 
 - [ ] `aws sts get-caller-identity` muestra la cuenta de laboratorio
 - [ ] `terraform.tfvars` lleno (y fuera de git: `git status` no lo muestra)
-- [ ] `terraform apply` creó la red sin errores
+- [ ] Leíste el `plan` local y el `apply` de GitHub Actions creó la red
 - [ ] Verificaste subredes y rutas con los comandos de 1.5
 - [ ] Probaste que la guarda de `allowed_account_ids` bloquea otra cuenta
 

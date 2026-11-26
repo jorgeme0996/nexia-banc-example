@@ -1,0 +1,129 @@
+#############################################################################
+# Terraform del laboratorio vía GitHub Actions + OIDC
+#############################################################################
+# Flujo:
+#   1. Abres un Pull Request que toca terraform/  -> job "plan" (rol plan,
+#      solo lectura). El plan aparece en el resumen del job. Lo revisas.
+#   2. Haces merge a main                         -> job "apply" en el
+#      environment "lab". Espera tu APROBACIÓN manual y luego aplica.
+#   3. Para apagar todo (ahorrar dinero)          -> Actions > "terraform" >
+#      Run workflow > action = destroy. También pide aprobación.
+#
+# Sin access keys: cada job pide credenciales temporales a AWS con su token
+# OIDC (por eso "permissions: id-token: write").
+
+name: terraform
+
+on:
+  pull_request:
+    paths: ["terraform/**", ".github/workflows/terraform.yml"]
+  push:
+    branches: [main]
+    paths: ["terraform/**", ".github/workflows/terraform.yml"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Qué hacer"
+        type: choice
+        options: [apply, destroy]
+        default: apply
+
+# Nunca dos ejecuciones de Terraform a la vez sobre el mismo state.
+concurrency:
+  group: terraform-lab
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  # Las variables de Terraform salen de las Variables del repo (no de un
+  # tfvars, que nunca se sube).
+  TF_VAR_lab_account_id: ${{ vars.TF_LAB_ACCOUNT_ID }}
+  TF_VAR_admin_cidr: ${{ vars.TF_ADMIN_CIDR }}
+  TF_VAR_region: ${{ vars.AWS_REGION }}
+
+defaults:
+  run:
+    working-directory: terraform
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # necesario para pedir el token OIDC
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.13"
+
+      - name: Credenciales AWS (rol plan, solo lectura)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-plan-${{ github.run_id }}
+
+      - name: Guarda — ¿estamos en la cuenta de laboratorio?
+        run: |
+          ACC=$(aws sts get-caller-identity --query Account --output text)
+          echo "Cuenta: $ACC"
+          test "$ACC" = "${{ vars.TF_LAB_ACCOUNT_ID }}"
+
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=${{ vars.AWS_REGION }}"
+      - run: terraform validate
+      - name: terraform plan
+        run: |
+          terraform plan -no-color -out=tfplan | tee plan.txt
+          {
+            echo '### Terraform plan'
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # El environment "lab" tiene "Required reviewers": el job se detiene
+    # hasta que tú lo apruebas. Y el rol apply SOLO confía en este environment.
+    environment: lab
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.13"
+
+      - name: Credenciales AWS (rol apply)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-apply-${{ github.run_id }}
+
+      - name: Guarda — ¿estamos en la cuenta de laboratorio?
+        run: |
+          ACC=$(aws sts get-caller-identity --query Account --output text)
+          echo "Cuenta: $ACC"
+          test "$ACC" = "${{ vars.TF_LAB_ACCOUNT_ID }}"
+
+      - run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=${{ vars.AWS_REGION }}"
+
+      - name: terraform apply
+        if: github.event_name == 'push' || inputs.action == 'apply'
+        run: terraform apply -auto-approve -no-color
+
+      - name: terraform destroy
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+        run: terraform destroy -auto-approve -no-color
