@@ -86,6 +86,11 @@ Guarda esa salida, la necesitas en 0.5.
 
 ```bash
 cd ~/Documents/DEVSECOPS/nexia-banc-example
+
+# El workflow llegó en ci/ (Claude no puede escribir directo en .github/).
+# GitHub solo lo reconoce dentro de .github/workflows/, así que muévelo:
+mkdir -p .github/workflows && mv ci/terraform.yml .github/workflows/ && rmdir ci
+
 git init -b main
 git add -A
 git status          # REVISA: no debe aparecer ningún terraform.tfvars ni .tfstate
