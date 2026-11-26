@@ -1,0 +1,9 @@
+# cp terraform.tfvars.example terraform.tfvars   (no se sube a git)
+
+# aws sts get-caller-identity --query Account --output text
+lab_account_id = "597869553271"
+
+# Tu repo de GitHub: owner/nombre
+github_repo = "jorgeme0996/nexia-banc-example"
+
+region = "us-east-1"
