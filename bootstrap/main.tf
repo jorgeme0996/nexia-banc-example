@@ -54,6 +54,18 @@ variable "github_repo" {
   }
 }
 
+variable "github_owner_id" {
+  type        = string
+  default     = ""
+  description = "ID numérico del dueño del repo. Vacío = formato clásico del sub (sin IDs)."
+}
+
+variable "github_repo_id" {
+  type        = string
+  default     = ""
+  description = "ID numérico del repo. Vacío = formato clásico del sub (sin IDs)."
+}
+
 variable "region" {
   type    = string
   default = "us-east-1"
@@ -110,14 +122,29 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 locals {
   oidc_arn = aws_iam_openid_connect_provider.github.arn
+
+  # Cómo se identifica el repo dentro del "sub" del token de GitHub.
+  #   Formato clásico:      repo:owner/nombre:...
+  #   Formato con IDs:      repo:owner@<owner_id>/nombre@<repo_id>:...
+  # GitHub puede mandar el formato con IDs INMUTABLES. Es más seguro: si
+  # borras o renombras el repo y alguien crea otro con el mismo nombre, el ID
+  # cambia y ese repo impostor NO puede asumir tus roles.
+  # El formato exacto que manda tu repo lo ves en CloudTrail:
+  # evento AssumeRoleWithWebIdentity -> userIdentity.userName.
+  owner = split("/", var.github_repo)[0]
+  repo  = split("/", var.github_repo)[1]
+  repo_subject = (var.github_owner_id != "" && var.github_repo_id != ""
+    ? "${local.owner}@${var.github_owner_id}/${local.repo}@${var.github_repo_id}"
+  : var.github_repo)
 }
 
 #############################################################################
 # 3. Rol PLAN — Pull Requests, solo lectura
 #############################################################################
 # El "sub" (subject) del token dice de dónde viene el job:
-#   repo:owner/nombre:pull_request          -> un job disparado por un PR
-#   repo:owner/nombre:environment:lab       -> un job del environment "lab"
+#   repo:<repo>:pull_request          -> un job disparado por un PR
+#   repo:<repo>:environment:lab       -> un job del environment "lab"
+# (<repo> = local.repo_subject, ver arriba)
 # Restringir el sub es LO que impide que otro repo de GitHub use tu rol.
 data "aws_iam_policy_document" "plan_trust" {
   statement {
@@ -134,7 +161,7 @@ data "aws_iam_policy_document" "plan_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:pull_request"]
+      values   = ["repo:${local.repo_subject}:pull_request"]
     }
   }
 }
@@ -193,7 +220,7 @@ data "aws_iam_policy_document" "apply_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:environment:lab"]
+      values   = ["repo:${local.repo_subject}:environment:lab"]
     }
   }
 }
@@ -222,5 +249,13 @@ output "github_variables" {
     AWS_APPLY_ROLE_ARN = aws_iam_role.apply.arn
     TF_STATE_BUCKET    = aws_s3_bucket.tfstate.id
     TF_LAB_ACCOUNT_ID  = var.lab_account_id
+  }
+}
+
+output "oidc_subjects_permitidos" {
+  description = "Los sub exactos que aceptan los roles. Compáralos con CloudTrail si algo falla."
+  value = {
+    plan  = "repo:${local.repo_subject}:pull_request"
+    apply = "repo:${local.repo_subject}:environment:lab"
   }
 }

@@ -13,8 +13,8 @@ para poder repetirla en cualquier otro ambiente.
 >   datos o cargas reales (ni la del trabajo).
 > - Cuesta dinero mientras está encendida: aproximadamente 4-6 USD al día
 >   (control plane de EKS, 1 nodo t3.medium y un RDS db.t3.micro).
-> - Destrúyela con `terraform destroy` cuando termines cada sesión si no la
->   vas a usar.
+> - Destrúyela cuando termines cada sesión si no la vas a usar: en GitHub,
+>   **Actions → terraform → Run workflow → destroy**.
 
 ---
 
@@ -38,9 +38,13 @@ evidencia**, sin saber de antemano qué pasó exactamente.
 
 ## Mapa de pasos
 
+Todo cambio de infraestructura se despliega con **GitHub Actions** (OIDC, sin
+access keys): PR → `plan` → merge → aprobación → `apply`.
+
 | Paso | Qué construimos | Estado |
 |------|-----------------|--------|
-| 1 | Guardas de seguridad + red (VPC, subredes) | ✅ este paso |
+| 0 | Bootstrap: OIDC de GitHub, roles plan/apply, bucket del state | ✅ listo |
+| 1 | Guardas de seguridad + red (VPC, subredes) | ✅ listo |
 | 2 | Cluster EKS y node group (con sus fallas sembradas) | pendiente |
 | 3 | RDS Postgres + Secrets Manager | pendiente |
 | 4 | Las "cámaras": CloudTrail, audit logs de EKS, logs de RDS | pendiente |
@@ -72,6 +76,8 @@ laboratorio**. Ver `docs/paso-01-red.md`.
 ## Estructura del repo (va creciendo con cada paso)
 
 ```
-terraform/   Infraestructura AWS
-docs/        Una guía por paso
+bootstrap/          Se aplica UNA vez desde tu Mac: OIDC, roles, bucket del state
+terraform/          Infraestructura del laboratorio (la despliega GitHub Actions)
+.github/workflows/  El pipeline: plan en PR, apply/destroy con aprobación
+docs/               Una guía por paso (empieza por paso-00)
 ```
